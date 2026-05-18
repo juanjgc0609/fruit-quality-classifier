@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Entornos virtuales
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Datos — NO subir imágenes pesadas
+data/raw/
+data/processed/
+data/external/
+!data/annotations/
+!data/README.md
+
+# Modelos entrenados (muy pesados para Git)
+models/saved/*.pkl
+models/saved/*.h5
+models/saved/*.pt
+models/saved/*.pth
+models/checkpoints/
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Streamlit
+.streamlit/
+
+# Reportes generados
+reports/figures/*.png
+reports/figures/*.pdf

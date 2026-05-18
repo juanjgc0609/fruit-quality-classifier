@@ -1,0 +1,4 @@
+filename,fruit_type,quality,size,source,annotator,notes
+manzana_premium_grande_G1_001.jpg,manzana,Premium,Grande,propio,Integrante1,
+manzana_estandar_mediano_G1_002.jpg,manzana,Estándar,Mediano,propio,Integrante2,Pequeña mancha
+tomate_descarte_pequeno_G1_003.jpg,tomate,Descarte,Pequeño,propio,Integrante3,Podredumbre visible
