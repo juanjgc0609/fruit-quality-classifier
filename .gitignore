@@ -31,6 +31,8 @@ models/saved/*.pkl
 models/saved/*.h5
 models/saved/*.pt
 models/saved/*.pth
+models/saved/*.keras
+models/saved/*.csv
 models/checkpoints/
 
 # MacOS
