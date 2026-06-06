@@ -52,3 +52,5 @@ models/checkpoints/
 # Reportes generados
 reports/figures/*.png
 reports/figures/*.pdf
+
+notebooks_other_member
