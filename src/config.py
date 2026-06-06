@@ -21,6 +21,7 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
 DATA_DIR = PROJECT_ROOT / "data"
 EXTERNAL_DIR = DATA_DIR / "external"          # Dataset Kaggle (no versionado)
+RAW_DIR = DATA_DIR / "raw"                    # Dataset propio (recolección del grupo)
 PROCESSED_DIR = DATA_DIR / "processed"        # Manifests y features cacheados
 ANNOTATIONS_DIR = DATA_DIR / "annotations"    # labels.csv, labels_own.csv
 
@@ -44,14 +45,38 @@ SEED: int = 42
 QUALITY_CLASSES: list[str] = ["Premium", "Estándar", "Descarte"]
 QUALITY_TO_IDX: dict[str, int] = {c: i for i, c in enumerate(QUALITY_CLASSES)}
 
+# Mapeo de carpetas de calidad -> clase del proyecto.
+#   Good    -> Premium       (1 fruta por foto)
+#   Regular -> Estándar      (1 fruta por foto, calidad media) [solo dataset propio]
+#   Bad     -> Descarte      (1 fruta por foto)
+# La carpeta Kaggle "Mixed" se EXCLUYE del entrenamiento (varias frutas por foto,
+# fondo no uniforme); se reserva para el ejercicio de segmentación/evaluación.
+FOLDER_QUALITY_MAP: dict[str, str] = {
+    "Good": "Premium",
+    "Regular": "Estándar",
+    "Bad": "Descarte",
+}
+
 # Tamaño: derivado por segmentación (diámetro en píxeles normalizados).
 SIZE_CLASSES: list[str] = ["Pequeño", "Mediano", "Grande"]
 
 # ─── Parámetros de preparación de datos ─────────────────────────────────────────
-# Cap por clase de calidad para mitigar el desbalanceo 10:1 (Premium domina).
-# La clase minoritaria (Estándar ~1074) se conserva completa; el residual se
-# corrige con class_weight='balanced' en los modelos.
-CAP_PER_QUALITY: int = 1500
+# Cap por (fruta × calidad): evita que una sola fruta domine una clase
+# (p. ej. Pomegranate_Good inflaba Premium, hallazgo del EDA §2.3) y reduce el
+# desbalanceo. El residual se corrige con class_weight='balanced'.
+CAP_PER_FRUIT_QUALITY: int = 400
+
+# ─── Enriquecimiento con la carpeta Mixed (segmentación multi-fruta) ─────────────
+# La carpeta Kaggle "Mixed" tiene varias frutas por foto. La segmentamos en
+# recortes individuales y los re-etiquetamos por daño (NTC-4580). Se usan SOLO
+# como enriquecimiento de TRAIN (nunca val/test) para no introducir etiquetas
+# derivadas de color en la evaluación (evita métricas circulares).
+INCLUDE_MIXED_ENRICHMENT: bool = True
+MIXED_DIRNAME: str = "Mixed Qualit_Fruits"          # nombre real en el dataset Kaggle
+CAP_MIXED_PER_FRUIT_QUALITY: int = 150              # tope de recortes Mixed por fruta×clase
+DAMAGE_PREMIUM_MAX: float = 2.0                      # umbral de daño (%) para Premium
+DAMAGE_STANDARD_MAX: float = 18.0                   # umbral de daño (%) para Estándar
+MIXED_MIN_AREA_RATIO: float = 0.01                  # área mínima de contorno (fracción)
 
 # Split estratificado por calidad.
 TRAIN_RATIO: float = 0.70

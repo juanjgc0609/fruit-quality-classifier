@@ -137,3 +137,103 @@ def assign_size_class(diameter_norm: float, thresholds: tuple[float, float]) -> 
     if diameter_norm < q66:
         return "Mediano"
     return "Grande"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Segmentación MULTI-fruta + estimación de daño (fusión con el trabajo del
+# compañero). Se usa para la carpeta Mixed, que el enunciado pide segmentar en
+# frutas individuales. El daño re-etiqueta cada recorte por la heurística NTC-4580.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _foreground_mask(gray: np.ndarray, adaptive: bool) -> np.ndarray:
+    """Máscara binaria de primer plano (Otsu o adaptativo) + morfología."""
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    if adaptive:
+        mask = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                     cv2.THRESH_BINARY_INV, 31, 2)
+    else:
+        _, mask = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=2)
+    return mask
+
+
+def compute_damage_pct(crop_rgb: np.ndarray, mask: np.ndarray) -> float:
+    """% de píxeles de la fruta con signos de daño (heurística NTC-4580, en HSV).
+
+    Combina tres evidencias dentro de la máscara de la fruta:
+      - oscuros (V<65)            -> necrosis / podredumbre
+      - bajo cromatismo (S<55,V<180) -> falta de pigmento / zonas enfermas
+      - pardos (H<35,30<S<190,V<170) -> oxidación / magulladuras
+    """
+    hsv = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2HSV)
+    h, s, v = cv2.split(hsv)
+    fruit = mask > 0
+    n = int(fruit.sum())
+    if n == 0:
+        return 100.0
+    dark = (v < 65) & fruit
+    low_sat = (s < 55) & (v < 180) & fruit
+    brownish = (h < 35) & (s > 30) & (s < 190) & (v < 170) & fruit
+    return float(100.0 * (dark | low_sat | brownish).sum() / n)
+
+
+def assign_quality_by_damage(damage_pct: float, premium_max: float = 2.0,
+                             standard_max: float = 18.0) -> str:
+    """Mapea el % de daño a clase de calidad (solo para recortes de Mixed)."""
+    if damage_pct < premium_max:
+        return "Premium"
+    if damage_pct <= standard_max:
+        return "Estándar"
+    return "Descarte"
+
+
+def segment_instances(image_rgb: np.ndarray, allow_multiple: bool = True,
+                      min_area_ratio: float = 0.01):
+    """Segmenta una o varias frutas en una imagen (fondo posiblemente complejo).
+
+    Elige entre Otsu y umbral adaptativo el que produce contornos de mayor área
+    media (penaliza fragmentación). Devuelve una lista de dicts con:
+      crop_rgb, mask (del recorte), diameter_norm (por diagonal de imagen original),
+      damage_pct.
+    """
+    h, w = image_rgb.shape[:2]
+    img_diag = float(np.hypot(h, w))
+    min_area_px = h * w * min_area_ratio
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+
+    best = None
+    for adaptive in (False, True):
+        mask = _foreground_mask(gray, adaptive)
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        valid = [c for c in cnts if cv2.contourArea(c) >= min_area_px]
+        score = float(np.mean([cv2.contourArea(c) for c in valid])) if valid else 0.0
+        if best is None or score > best[0]:
+            best = (score, valid)
+    contours = sorted(best[1], key=cv2.contourArea, reverse=True)
+    if not allow_multiple:
+        contours = contours[:1]
+
+    out = []
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        if area <= 0:
+            continue
+        x, y, bw, bh = cv2.boundingRect(cnt)
+        pad = max(2, int(0.02 * max(h, w)))
+        x0, y0 = max(0, x - pad), max(0, y - pad)
+        x1, y1 = min(w, x + bw + pad), min(h, y + bh + pad)
+        crop = image_rgb[y0:y1, x0:x1].copy()
+        if crop.size == 0:
+            continue
+        full = np.zeros((h, w), np.uint8)
+        cv2.drawContours(full, [cnt], -1, 255, thickness=cv2.FILLED)
+        mcrop = full[y0:y1, x0:x1]
+        out.append({
+            "crop_rgb": crop,
+            "mask": mcrop,
+            "diameter_norm": float(2.0 * np.sqrt(area / np.pi)) / img_diag,
+            "damage_pct": compute_damage_pct(crop, mcrop),
+        })
+    return out

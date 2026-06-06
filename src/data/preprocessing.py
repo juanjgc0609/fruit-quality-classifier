@@ -1,16 +1,24 @@
 """
 C2/C3 — Preparación y balanceo de datos
 ========================================
-Construye los manifests (train/val/test) a partir del `labels.csv`, aplicando:
+Construye los manifests (train/val/test) a partir de DOS fuentes combinadas:
 
+  - Kaggle (data/external): Good->Premium, Bad->Descarte.  (Mixed se EXCLUYE)
+  - Propio (data/raw):      Good->Premium, Regular->Estándar, Bad->Descarte.
+
+La clase **Estándar** proviene de las imágenes propias "Regular" (1 fruta por
+foto), reemplazando a la carpeta Kaggle "Mixed" (varias frutas por foto).
+
+Pasos:
   - Limpieza:  verificación de existencia de archivos.
-  - Balanceo (C3):  cap por clase de calidad para mitigar el desbalanceo 10:1.
-                    El residual lo absorben los modelos con class_weight.
-  - Split estratificado 70/15/15 por calidad (reproducible con SEED).
+  - Balanceo (C3):  cap por (fruta × calidad) para evitar que una fruta domine
+                    una clase (hallazgo EDA §2.3) + class_weight en los modelos.
+  - Split 70/15/15 POR GRUPO (anti-fuga) y estratificado por calidad.
   - Estimación de tamaño (C1) integrada: terciles aprendidos en train.
 
 Salida: data/processed/manifest_{train,val,test}.csv con columnas
-        [path, quality, quality_idx, fruit, size, diameter_norm, split].
+        [path, quality, quality_idx, fruit, source, size, diameter_norm,
+         group_id, split].
 """
 
 from __future__ import annotations
@@ -20,43 +28,102 @@ from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
 from src.data.dedup import assign_groups
 from src.config import (
-    CAP_PER_QUALITY,
+    CAP_MIXED_PER_FRUIT_QUALITY,
+    CAP_PER_FRUIT_QUALITY,
+    DAMAGE_PREMIUM_MAX,
+    DAMAGE_STANDARD_MAX,
+    EXTERNAL_DIR,
+    FOLDER_QUALITY_MAP,
+    INCLUDE_MIXED_ENRICHMENT,
     LABELS_CSV,
+    MIXED_DIRNAME,
+    MIXED_MIN_AREA_RATIO,
     PROCESSED_DIR,
     QUALITY_CLASSES,
     QUALITY_TO_IDX,
+    RAW_DIR,
     SEED,
     TEST_RATIO,
     VAL_RATIO,
 )
 from src.data.paths import load_image_rgb, resolve_path
 from src.data.segmentation import (
+    assign_quality_by_damage,
     assign_size_class,
     compute_size_thresholds,
     segment_fruit,
+    segment_instances,
 )
 
 
-def load_clean_labels() -> pd.DataFrame:
-    """Carga labels.csv y elimina filas cuyo archivo no existe en disco."""
-    df = pd.read_csv(LABELS_CSV)
-    df = df[df["quality"].isin(QUALITY_CLASSES)].copy()
-    df["abs_path"] = df["path"].map(lambda p: resolve_path(p))
+_IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _scan_folder_dataset(base_dir, source: str) -> pd.DataFrame:
+    """Recorre carpetas '<Calidad> Quality_Fruits/<Fruta>_<Calidad>/*.jpg'.
+
+    Mapea la calidad de la carpeta (Good/Regular/Bad) a la clase del proyecto
+    según FOLDER_QUALITY_MAP. La fruta se toma del prefijo de la subcarpeta.
+    Devuelve columnas [path, quality, fruit, source, abs_path].
+    """
+    rows = []
+    if not base_dir.exists():
+        return pd.DataFrame(columns=["path", "quality", "fruit", "source", "abs_path"])
+    for quality_dir in sorted(base_dir.glob("* Quality_Fruits")):
+        folder_quality = quality_dir.name.split(" ")[0]          # 'Good'/'Bad'/'Regular'
+        cls = FOLDER_QUALITY_MAP.get(folder_quality)
+        if cls is None:                                          # p. ej. 'Mixed' -> se ignora
+            continue
+        for fruit_dir in sorted(quality_dir.iterdir()):
+            if not fruit_dir.is_dir():
+                continue
+            fruit = fruit_dir.name.split("_")[0]                 # 'Apple_Good' -> 'Apple'
+            for img in fruit_dir.iterdir():
+                if img.suffix.lower() in _IMG_EXTS:
+                    rows.append({
+                        "path": str(img.relative_to(base_dir.parents[1])),
+                        "quality": cls, "fruit": fruit, "source": source,
+                        "abs_path": img.resolve(),
+                    })
+    return pd.DataFrame(rows)
+
+
+def load_combined_labels() -> pd.DataFrame:
+    """Combina Kaggle (Good/Bad, sin Mixed) + dataset propio (Good/Regular/Bad).
+
+    - Kaggle: se reutiliza el `labels.csv` ya catalogado, filtrando SOLO
+      Premium/Descarte (se descarta la clase Mixed=Estándar).
+    - Propio: se escanean las carpetas de `data/raw/`.
+    """
+    # --- Kaggle (sin Mixed) ---
+    kag = pd.read_csv(LABELS_CSV)
+    kag = kag[kag["quality"].isin(["Premium", "Descarte"])].copy()
+    kag["source"] = "kaggle"
+    kag["abs_path"] = kag["path"].map(resolve_path)
+    kag = kag[["path", "quality", "fruit", "source", "abs_path"]]
+
+    # --- Propio (data/raw) ---
+    own = _scan_folder_dataset(RAW_DIR, "propio")
+
+    df = pd.concat([kag, own], ignore_index=True)
     exists = df["abs_path"].map(lambda p: p.exists())
     n_missing = int((~exists).sum())
     if n_missing:
         print(f"[clean] {n_missing} archivos no encontrados -> descartados")
-    return df[exists].reset_index(drop=True)
+    df = df[exists].reset_index(drop=True)
+    print(f"[load] Kaggle={ (df['source']=='kaggle').sum() } | "
+          f"Propio={ (df['source']=='propio').sum() } | Total={len(df)}")
+    return df
 
 
-def apply_cap(df: pd.DataFrame, cap: int = CAP_PER_QUALITY) -> pd.DataFrame:
-    """Submuestrea cada clase de calidad a lo sumo a `cap` ejemplos.
+def apply_cap(df: pd.DataFrame, cap: int = CAP_PER_FRUIT_QUALITY) -> pd.DataFrame:
+    """Submuestrea cada combinación (fruta × calidad) a lo sumo a `cap` ejemplos.
 
-    Reduce el desbalanceo (Premium 11664 -> cap) y el costo de cómputo, sin
-    tocar la clase minoritaria (Estándar) que se conserva completa.
+    Evita que una fruta domine una clase (p. ej. Pomegranate_Good en Premium,
+    hallazgo del EDA §2.3) y reduce el costo de cómputo.
     """
     parts = []
-    for cls, grp in df.groupby("quality"):
+    for _, grp in df.groupby(["fruit", "quality"]):
         if len(grp) > cap:
             grp = grp.sample(cap, random_state=SEED)
         parts.append(grp)
@@ -139,24 +206,92 @@ def estimate_sizes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build_manifests(cap: int = CAP_PER_QUALITY, with_size: bool = True) -> pd.DataFrame:
+def build_mixed_enrichment(thresholds: tuple[float, float]) -> pd.DataFrame:
+    """Segmenta la carpeta Mixed en frutas individuales y las re-etiqueta por daño.
+
+    Cada recorte se guarda en disco y se devuelve como fila lista para añadir a
+    TRAIN (nunca val/test). Cumple el requisito del enunciado de segmentar Mixed
+    y enriquece el dataset sin meter etiquetas derivadas de color en la evaluación.
+    """
+    import cv2
+    from tqdm.auto import tqdm
+
+    mixed_dir = EXTERNAL_DIR / MIXED_DIRNAME
+    if not mixed_dir.exists():
+        print(f"[mixed] carpeta no encontrada: {mixed_dir} -> sin enriquecimiento")
+        return pd.DataFrame()
+
+    crops_root = PROCESSED_DIR / "mixed_crops"
+    root = PROCESSED_DIR.parents[1]                  # raíz del repo (para rutas relativas)
+    rows = []
+    img_paths = [p for p in mixed_dir.rglob("*")
+                 if p.suffix.lower() in _IMG_EXTS and p.is_file()]
+    for p in tqdm(img_paths, desc="mixed-seg"):
+        fruit = p.parent.name.split("_")[0]
+        img = load_image_rgb(p)
+        if img is None:
+            continue
+        for k, inst in enumerate(segment_instances(img, allow_multiple=True,
+                                                   min_area_ratio=MIXED_MIN_AREA_RATIO)):
+            quality = assign_quality_by_damage(inst["damage_pct"],
+                                               DAMAGE_PREMIUM_MAX, DAMAGE_STANDARD_MAX)
+            out_dir = crops_root / quality / fruit
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f"{p.stem}__seg{k:02d}.png"
+            cv2.imwrite(str(out_path), cv2.cvtColor(inst["crop_rgb"], cv2.COLOR_RGB2BGR))
+            rows.append({
+                "path": str(out_path.relative_to(root)),
+                "quality": quality, "fruit": fruit, "source": "mixed_seg",
+                "diameter_norm": inst["diameter_norm"],
+                "size": assign_size_class(inst["diameter_norm"], thresholds),
+            })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    # Cap por fruta×calidad para que el enriquecimiento no domine ninguna clase.
+    parts = [g.sample(min(len(g), CAP_MIXED_PER_FRUIT_QUALITY), random_state=SEED)
+             for _, g in df.groupby(["fruit", "quality"])]
+    df = pd.concat(parts).reset_index(drop=True)
+    df["split"] = "train"
+    df["quality_idx"] = df["quality"].map(QUALITY_TO_IDX)
+    print(f"[mixed] {len(df)} recortes de enriquecimiento añadidos a train")
+    print(df["quality"].value_counts().to_dict())
+    return df
+
+
+def build_manifests(cap: int = CAP_PER_FRUIT_QUALITY, with_size: bool = True) -> pd.DataFrame:
     """Pipeline completo. Devuelve el DataFrame y guarda los manifests."""
-    df = load_clean_labels()
+    df = load_combined_labels()
     df = apply_cap(df, cap)
     # Anti-fuga: agrupar casi-duplicados y dividir por grupo.
     df["group_id"] = assign_groups(df["abs_path"].tolist())
     df = grouped_split(df)
+    thresholds = (float("nan"), float("nan"))
     if with_size:
         df = estimate_sizes(df)
+        # Capturar los umbrales explícitamente (df.attrs no sobrevive a concat).
+        thresholds = compute_size_thresholds(
+            df.loc[df["split"] == "train", "diameter_norm"].dropna().values)
     else:
         df["diameter_norm"] = float("nan")
         df["size"] = "Mediano"
 
     df["quality_idx"] = df["quality"].map(QUALITY_TO_IDX)
 
+    # Enriquecimiento Mixed (segmentado) -> SOLO train.
+    if with_size and INCLUDE_MIXED_ENRICHMENT:
+        mixed = build_mixed_enrichment(thresholds)
+        if not mixed.empty:
+            mixed["group_id"] = range(int(df["group_id"].max()) + 1,
+                                      int(df["group_id"].max()) + 1 + len(mixed))
+            mixed["abs_path"] = mixed["path"].map(resolve_path)
+            df = pd.concat([df, mixed], ignore_index=True)
+
+    df.attrs["size_thresholds"] = thresholds
+
     # Guardar un manifest por split con la ruta relativa original (portable).
-    cols = ["path", "quality", "quality_idx", "fruit", "size", "diameter_norm",
-            "group_id", "split"]
+    cols = ["path", "quality", "quality_idx", "fruit", "source", "size",
+            "diameter_norm", "group_id", "split"]
     for split in ("train", "val", "test"):
         sub = df.loc[df["split"] == split, cols]
         sub.to_csv(PROCESSED_DIR / f"manifest_{split}.csv", index=False)
@@ -164,10 +299,12 @@ def build_manifests(cap: int = CAP_PER_QUALITY, with_size: bool = True) -> pd.Da
     if with_size:
         import json
         (PROCESSED_DIR / "size_thresholds.json").write_text(
-            json.dumps({"q33": df.attrs["size_thresholds"][0],
-                        "q66": df.attrs["size_thresholds"][1]})
-        )
-    print(f"[build] manifests guardados en {PROCESSED_DIR}")
+            json.dumps({"q33": thresholds[0], "q66": thresholds[1]}))
+    # Invalidar el cache de features: los manifests cambiaron y las features
+    # cacheadas (.npy) quedarían desalineadas con las nuevas particiones.
+    for f in list(PROCESSED_DIR.glob("X_*.npy")) + list(PROCESSED_DIR.glob("y_*.npy")):
+        f.unlink()
+    print(f"[build] manifests guardados en {PROCESSED_DIR} (cache de features invalidado)")
     return df
 
 
