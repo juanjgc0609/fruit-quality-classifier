@@ -23,6 +23,7 @@ ENV/
 data/raw/
 data/processed/
 data/external/
+data/own/
 !data/annotations/
 !data/README.md
 
