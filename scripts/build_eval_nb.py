@@ -110,11 +110,33 @@ for src in ['kaggle','propio']:
 by_source = pd.DataFrame(rows).set_index(['fuente','modelo'])
 print(by_source.round(3))""")
 
-M("""## 7. Resumen de la Fase 5
-- Comparación justa (mismo test, split **sin fuga**).
+M("""## 7. Sobre la salida de **tamaño** (aclaración importante)
+El tamaño NO lo predice un modelo: se mide por segmentación como
+**diámetro equivalente / diagonal de la imagen**. Es decir, refleja **cuánto llena
+la fruta el encuadre**, no su diámetro físico real (que requeriría una referencia
+de escala en la foto). Por eso aparece correlacionado con la fuente/tipo de foto.""")
+C("""import pandas as pd
+ct = pd.crosstab(te['quality'], te['size']).reindex(index=QUALITY_CLASSES,
+        columns=['Pequeño','Mediano','Grande'])
+print("Tamaño (estimado) × calidad en test:"); print(ct.to_string())
+print("\\n→ El tamaño es 'fracción del encuadre ocupada por la fruta', medida")
+print("  reproducible y útil para la app, pero NO equivale a tamaño físico.")""")
+
+M("## 8. Ablation (resumen): ¿ayudó el enriquecimiento Mixed?")
+C("""import pandas as pd
+from src.config import MODELS_DIR
+for name,f in [('ML (RF/XGB)','ablation_ml.csv'),('CNN','ablation_cnn.csv')]:
+    p=MODELS_DIR/f
+    if p.exists():
+        print(f"=== {name} ===)"); print(pd.read_csv(p).round(4).to_string(index=False)); print()
+print("Los modelos guardados corresponden a la variante ganadora por modelo.")""")
+
+M("""## 9. Resumen de la Fase 5
+- Comparación justa (mismo test, split **sin fuga**), 3 clases balanceadas en test.
 - Tabla, matrices de confusión y **análisis de errores**.
 - **Desglose por fuente** (Kaggle vs propio) → evidencia de generalización.
-- Recordatorio: la salida de **tamaño** se evalúa aparte (medición por segmentación).""")
+- **Ablation** con/sin enriquecimiento Mixed: se conserva la variante ganadora.
+- **Tamaño**: medición por segmentación (fracción del encuadre), no físico.""")
 
 nb = new_notebook(cells=cells)
 nb.metadata.kernelspec = {"display_name":"Python (fruit-quality)","language":"python","name":"fruit-quality"}

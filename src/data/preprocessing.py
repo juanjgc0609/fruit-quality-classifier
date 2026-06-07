@@ -89,20 +89,17 @@ def _scan_folder_dataset(base_dir, source: str) -> pd.DataFrame:
 
 
 def load_combined_labels() -> pd.DataFrame:
-    """Combina Kaggle (Good/Bad, sin Mixed) + dataset propio (Good/Regular/Bad).
+    """Combina AMBAS fuentes escaneando carpetas (no depende de labels.csv).
 
-    - Kaggle: se reutiliza el `labels.csv` ya catalogado, filtrando SOLO
-      Premium/Descarte (se descarta la clase Mixed=Estándar).
-    - Propio: se escanean las carpetas de `data/raw/`.
+    - Kaggle (`data/external`): Good→Premium, Regular→Estándar, Bad→Descarte.
+    - Propio (`data/raw`):       Good→Premium, Regular→Estándar, Bad→Descarte.
+
+    La carpeta Kaggle "Mixed Qualit_Fruits" NO coincide con el patrón
+    "* Quality_Fruits", así que queda excluida automáticamente (se trata aparte
+    como enriquecimiento). Escanear carpetas (en vez de leer labels.csv) hace que
+    el Regular externo —clasificado a mano— entre sin depender de catálogos viejos.
     """
-    # --- Kaggle (sin Mixed) ---
-    kag = pd.read_csv(LABELS_CSV)
-    kag = kag[kag["quality"].isin(["Premium", "Descarte"])].copy()
-    kag["source"] = "kaggle"
-    kag["abs_path"] = kag["path"].map(resolve_path)
-    kag = kag[["path", "quality", "fruit", "source", "abs_path"]]
-
-    # --- Propio (data/raw) ---
+    kag = _scan_folder_dataset(EXTERNAL_DIR, "kaggle")
     own = _scan_folder_dataset(RAW_DIR, "propio")
 
     df = pd.concat([kag, own], ignore_index=True)
@@ -111,9 +108,27 @@ def load_combined_labels() -> pd.DataFrame:
     if n_missing:
         print(f"[clean] {n_missing} archivos no encontrados -> descartados")
     df = df[exists].reset_index(drop=True)
-    print(f"[load] Kaggle={ (df['source']=='kaggle').sum() } | "
-          f"Propio={ (df['source']=='propio').sum() } | Total={len(df)}")
+    print(f"[load] Kaggle={(df['source']=='kaggle').sum()} | "
+          f"Propio={(df['source']=='propio').sum()} | Total={len(df)}")
+    print(pd.crosstab(df["quality"], df["source"]).to_string())
     return df
+
+
+def regenerate_labels_csv(df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Regenera `data/annotations/labels.csv` con UN solo esquema, limpio.
+
+    Esquema: [path, quality, quality_idx, fruit, source]. Refleja el catálogo
+    combinado escaneado (3 clases, sin Mixed). Reemplaza el labels.csv antiguo
+    que tenía esquema doble y rutas muertas (data/own inexistente).
+    """
+    if df is None:
+        df = load_combined_labels()
+    out = df[["path", "quality", "fruit", "source"]].copy()
+    out["quality_idx"] = out["quality"].map(QUALITY_TO_IDX)
+    out = out[["path", "quality", "quality_idx", "fruit", "source"]]
+    out.to_csv(LABELS_CSV, index=False)
+    print(f"[labels] {LABELS_CSV} regenerado: {len(out)} filas, esquema único")
+    return out
 
 
 def apply_cap(df: pd.DataFrame, cap: int = CAP_PER_FRUIT_QUALITY) -> pd.DataFrame:
@@ -155,30 +170,31 @@ def stratified_split(df: pd.DataFrame) -> pd.DataFrame:
 def grouped_split(df: pd.DataFrame) -> pd.DataFrame:
     """Split 70/15/15 POR GRUPO (anti-fuga) y estratificado por calidad.
 
-    Todas las fotos de una misma fruta (`group_id`) caen en la misma partición.
-    Como cada grupo de casi-duplicados pertenece a una sola clase de calidad,
-    aplicamos GroupShuffleSplit **dentro de cada clase** -> se preserva a la vez
-    la integridad de grupos y la proporción de clases.
+    Cada `group_id` (conjunto de casi-duplicados) se asigna **entero** a una sola
+    partición. La asignación se hace a nivel de GRUPO, estratificando por la clase
+    representativa del grupo (su moda). Esto es robusto incluso si un grupo de
+    casi-duplicados abarca imágenes de distinta clase (caso raro pero posible en el
+    dataset combinado): el grupo completo va a un único split → cero fuga.
     """
+    import numpy as np
     df = df.copy()
     df["split"] = None
-    val_size = VAL_RATIO / (1.0 - TEST_RATIO)
 
-    for _, cls_df in df.groupby("quality"):
-        idx = cls_df.index.values
-        groups = cls_df["group_id"].values
+    # Clase representativa y un orden reproducible por grupo.
+    grp_quality = df.groupby("group_id")["quality"].agg(lambda s: s.mode().iat[0])
+    rng = np.random.RandomState(SEED)
 
-        gss_test = GroupShuffleSplit(n_splits=1, test_size=TEST_RATIO, random_state=SEED)
-        trval_loc, test_loc = next(gss_test.split(idx, groups=groups))
-        trval_idx, test_idx = idx[trval_loc], idx[test_loc]
-
-        gss_val = GroupShuffleSplit(n_splits=1, test_size=val_size, random_state=SEED)
-        tr_loc, val_loc = next(gss_val.split(trval_idx, groups=groups[trval_loc]))
-        train_idx, val_idx = trval_idx[tr_loc], trval_idx[val_loc]
-
-        df.loc[train_idx, "split"] = "train"
-        df.loc[val_idx, "split"] = "val"
-        df.loc[test_idx, "split"] = "test"
+    for cls in df["quality"].unique():
+        gids = grp_quality[grp_quality == cls].index.to_numpy()
+        rng.shuffle(gids)
+        n = len(gids)
+        n_test = int(round(n * TEST_RATIO))
+        n_val = int(round(n * VAL_RATIO))
+        test_g = set(gids[:n_test])
+        val_g = set(gids[n_test:n_test + n_val])
+        train_g = set(gids[n_test + n_val:])
+        for split, gset in (("train", train_g), ("val", val_g), ("test", test_g)):
+            df.loc[df["group_id"].isin(gset), "split"] = split
     return df
 
 
@@ -232,7 +248,8 @@ def build_mixed_enrichment(thresholds: tuple[float, float]) -> pd.DataFrame:
         if img is None:
             continue
         for k, inst in enumerate(segment_instances(img, allow_multiple=True,
-                                                   min_area_ratio=MIXED_MIN_AREA_RATIO)):
+                                                   min_area_ratio=MIXED_MIN_AREA_RATIO,
+                                                   fruit_name=fruit)):
             quality = assign_quality_by_damage(inst["damage_pct"],
                                                DAMAGE_PREMIUM_MAX, DAMAGE_STANDARD_MAX)
             out_dir = crops_root / quality / fruit
@@ -262,6 +279,7 @@ def build_mixed_enrichment(thresholds: tuple[float, float]) -> pd.DataFrame:
 def build_manifests(cap: int = CAP_PER_FRUIT_QUALITY, with_size: bool = True) -> pd.DataFrame:
     """Pipeline completo. Devuelve el DataFrame y guarda los manifests."""
     df = load_combined_labels()
+    regenerate_labels_csv(df)          # labels.csv limpio (un solo esquema)
     df = apply_cap(df, cap)
     # Anti-fuga: agrupar casi-duplicados y dividir por grupo.
     df["group_id"] = assign_groups(df["abs_path"].tolist())

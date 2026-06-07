@@ -159,21 +159,32 @@ def _foreground_mask(gray: np.ndarray, adaptive: bool) -> np.ndarray:
     return mask
 
 
-def compute_damage_pct(crop_rgb: np.ndarray, mask: np.ndarray) -> float:
+# FIX-PER-FRUIT: umbral V del criterio "oscuro" ajustado por especie. Algunas
+# frutas son naturalmente oscuras/poco luminosas (banano maduro, granada) y un
+# umbral global las marcaría como dañadas (falso positivo cromático fisiológico).
+FRUIT_DARK_V_THRESHOLD: dict[str, int] = {"Banana": 35, "Pomegranate": 40}
+_DEFAULT_DARK_V: int = 55
+
+
+def compute_damage_pct(crop_rgb: np.ndarray, mask: np.ndarray,
+                       fruit_name: str | None = None) -> float:
     """% de píxeles de la fruta con signos de daño (heurística NTC-4580, en HSV).
 
     Combina tres evidencias dentro de la máscara de la fruta:
-      - oscuros (V<65)            -> necrosis / podredumbre
+      - oscuros (V<umbral_especie) -> necrosis / podredumbre
       - bajo cromatismo (S<55,V<180) -> falta de pigmento / zonas enfermas
       - pardos (H<35,30<S<190,V<170) -> oxidación / magulladuras
+
+    El umbral "oscuro" depende de la especie (FIX-PER-FRUIT).
     """
+    dark_v = FRUIT_DARK_V_THRESHOLD.get(fruit_name, _DEFAULT_DARK_V)
     hsv = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2HSV)
     h, s, v = cv2.split(hsv)
     fruit = mask > 0
     n = int(fruit.sum())
     if n == 0:
         return 100.0
-    dark = (v < 65) & fruit
+    dark = (v < dark_v) & fruit
     low_sat = (s < 55) & (v < 180) & fruit
     brownish = (h < 35) & (s > 30) & (s < 190) & (v < 170) & fruit
     return float(100.0 * (dark | low_sat | brownish).sum() / n)
@@ -189,14 +200,50 @@ def assign_quality_by_damage(damage_pct: float, premium_max: float = 2.0,
     return "Descarte"
 
 
+def _watershed_split(image_rgb: np.ndarray, mask: np.ndarray,
+                     min_area_px: float) -> list[np.ndarray]:
+    """Separa frutas que se TOCAN en máscaras individuales (watershed).
+
+    Usa la transformada de distancia para hallar el "núcleo" de cada fruta
+    (máximos locales bien separados) y watershed para trazar la frontera entre
+    frutas pegadas. Devuelve una lista de máscaras binarias, una por fruta.
+    """
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    if dist.max() <= 0:
+        return []
+    # Núcleos seguros de fruta: picos de la distancia (separa frutas pegadas).
+    _, sure_fg = cv2.threshold(dist, 0.45 * dist.max(), 255, 0)
+    sure_fg = sure_fg.astype(np.uint8)
+    kernel = np.ones((3, 3), np.uint8)
+    sure_bg = cv2.dilate(mask, kernel, iterations=3)
+    unknown = cv2.subtract(sure_bg, sure_fg)
+
+    n_markers, markers = cv2.connectedComponents(sure_fg)
+    markers = markers + 1               # fondo = 1 (no 0)
+    markers[unknown == 255] = 0         # regiones desconocidas a resolver
+    bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    markers = cv2.watershed(bgr, markers)
+
+    out = []
+    for lab in range(2, markers.max() + 1):
+        m = np.uint8(markers == lab) * 255
+        if int(m.sum()) // 255 >= min_area_px:
+            # cerrar pequeños huecos del borde de watershed
+            m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel, iterations=1)
+            out.append(m)
+    return out
+
+
 def segment_instances(image_rgb: np.ndarray, allow_multiple: bool = True,
-                      min_area_ratio: float = 0.01):
+                      min_area_ratio: float = 0.01, fruit_name: str | None = None):
     """Segmenta una o varias frutas en una imagen (fondo posiblemente complejo).
 
-    Elige entre Otsu y umbral adaptativo el que produce contornos de mayor área
-    media (penaliza fragmentación). Devuelve una lista de dicts con:
-      crop_rgb, mask (del recorte), diameter_norm (por diagonal de imagen original),
-      damage_pct.
+    1. Construye la máscara de primer plano (Otsu vs adaptativo, el de mayor
+       área media de contornos).
+    2. Si `allow_multiple`, separa frutas que se tocan con **watershed**; si no,
+       toma el mayor contorno.
+    Devuelve una lista de dicts: crop_rgb, mask (del recorte), diameter_norm
+    (por diagonal de la imagen original), damage_pct.
     """
     h, w = image_rgb.shape[:2]
     img_diag = float(np.hypot(h, w))
@@ -210,30 +257,47 @@ def segment_instances(image_rgb: np.ndarray, allow_multiple: bool = True,
         valid = [c for c in cnts if cv2.contourArea(c) >= min_area_px]
         score = float(np.mean([cv2.contourArea(c) for c in valid])) if valid else 0.0
         if best is None or score > best[0]:
-            best = (score, valid)
-    contours = sorted(best[1], key=cv2.contourArea, reverse=True)
-    if not allow_multiple:
-        contours = contours[:1]
+            best = (score, mask, valid)
+    _, best_mask, valid_contours = best
+
+    # Máscara de primer plano limpia (solo contornos válidos).
+    fg = np.zeros((h, w), np.uint8)
+    for c in sorted(valid_contours, key=cv2.contourArea, reverse=True):
+        cv2.drawContours(fg, [c], -1, 255, thickness=cv2.FILLED)
+
+    if allow_multiple:
+        inst_masks = _watershed_split(image_rgb, fg, min_area_px)
+        if not inst_masks:                          # fallback: un contorno = una fruta
+            inst_masks = []
+            for c in valid_contours:
+                m = np.zeros((h, w), np.uint8)
+                cv2.drawContours(m, [c], -1, 255, thickness=cv2.FILLED)
+                inst_masks.append(m)
+    else:                                           # una sola fruta (mayor contorno)
+        inst_masks = []
+        if valid_contours:
+            c = max(valid_contours, key=cv2.contourArea)
+            m = np.zeros((h, w), np.uint8)
+            cv2.drawContours(m, [c], -1, 255, thickness=cv2.FILLED)
+            inst_masks = [m]
 
     out = []
-    for cnt in contours:
-        area = float(cv2.contourArea(cnt))
-        if area <= 0:
+    pad = max(2, int(0.02 * max(h, w)))
+    for m in inst_masks:
+        area = float((m > 0).sum())
+        if area < min_area_px:
             continue
-        x, y, bw, bh = cv2.boundingRect(cnt)
-        pad = max(2, int(0.02 * max(h, w)))
-        x0, y0 = max(0, x - pad), max(0, y - pad)
-        x1, y1 = min(w, x + bw + pad), min(h, y + bh + pad)
+        ys, xs = np.where(m > 0)
+        x0, y0 = max(0, xs.min() - pad), max(0, ys.min() - pad)
+        x1, y1 = min(w, xs.max() + pad), min(h, ys.max() + pad)
         crop = image_rgb[y0:y1, x0:x1].copy()
         if crop.size == 0:
             continue
-        full = np.zeros((h, w), np.uint8)
-        cv2.drawContours(full, [cnt], -1, 255, thickness=cv2.FILLED)
-        mcrop = full[y0:y1, x0:x1]
+        mcrop = m[y0:y1, x0:x1]
         out.append({
             "crop_rgb": crop,
             "mask": mcrop,
             "diameter_norm": float(2.0 * np.sqrt(area / np.pi)) / img_diag,
-            "damage_pct": compute_damage_pct(crop, mcrop),
+            "damage_pct": compute_damage_pct(crop, mcrop, fruit_name),
         })
     return out
