@@ -31,14 +31,14 @@ recolección propia (`data/raw`), escaneando carpetas.
 | 2 | Distribución de clases, desbalanceo, anomalía Pomegranate, **label noise** |
 | 3 | **Discordancia espacial** de Mixed (boxplots, KDE, Kolmogórov–Smirnov, ECDF) |
 | 4 | Propiedades visuales (brillo/contraste/saturación) y resolución |
-| 5 | **Solapamiento distributivo** Mixed (HSV+LBP → PCA/t-SNE, Jensen–Shannon, Bhattacharyya) |
+| 5 | **Solapamiento distributivo** Mixed (HSV+LBP  PCA/t-SNE, Jensen–Shannon, Bhattacharyya) |
 | 6 | Espacio de color RGB por clase |
 | 7 | Ejemplos por clase |
 | 8 | Tests estadísticos (Kruskal–Wallis) |
 | 9 | Propio vs Kaggle (Mann–Whitney U) |
-| 10 | Conclusiones → decisiones para Fase 3 |""")
+| 10 | Conclusiones  decisiones para Fase 3 |""")
 
-# ── 0. Setup ──────────────────────────────────────────────────────────────────
+# 0. Setup
 M("## 0. Configuración del entorno")
 C("""import sys, pathlib, random, math
 ROOT = pathlib.Path.cwd()
@@ -59,7 +59,7 @@ QPAL = {"Premium":"#2ecc71","Estándar":"#f39c12","Descarte":"#e74c3c","Mixed":"
 FPAL = {"Good":"#2ecc71","Regular":"#f39c12","Bad":"#e74c3c","Mixed":"#9b59b6"}
 print("Repo:", ROOT)""")
 
-# ── 1. Inventory ──────────────────────────────────────────────────────────────
+# 1. Inventory
 M("""## 1. Inventario del dataset combinado
 Escaneamos ambas fuentes (incluida Mixed, que se **analiza** pero no es clase de
 entrenamiento). Cada imagen: ruta, `folder` (Good/Regular/Bad/Mixed), calidad,
@@ -90,7 +90,7 @@ print(f"  Carpetas de origen  : {sorted(df.folder.unique())}")
 print('═'*60)
 display(df.head(6))""")
 
-# ── 2. Class distribution ─────────────────────────────────────────────────────
+# 2. Class distribution
 M("## 2. Distribución de clases de calidad\n### 2.1 Conteos y ratio de desbalance (3 clases de entrenamiento; Mixed aparte)")
 C("""train_q = df[df['quality']!='Mixed']
 cc = train_q['quality'].value_counts().reindex(QUALITY_CLASSES)
@@ -99,7 +99,7 @@ summary = pd.DataFrame({'Clase':cc.index,'N':cc.values,'%':pct.values,
                         'Ratio vs mín':(cc.values/cc.min()).round(2)})
 print(summary.to_string(index=False))
 ir = cc.max()/cc.min()
-print(f"\\nImbalance Ratio: {ir:.2f}x", "→ CRÍTICO" if ir>5 else "→ MODERADO" if ir>2 else "→ aceptable")
+print(f"\\nImbalance Ratio: {ir:.2f}x", " CRÍTICO" if ir>5 else " MODERADO" if ir>2 else " aceptable")
 fig,ax=plt.subplots(1,3,figsize=(16,4.5))
 cc.plot.bar(ax=ax[0], color=[QPAL[c] for c in cc.index]); ax[0].set_title("Conteo absoluto"); ax[0].tick_params(axis='x',rotation=0)
 ax[1].pie(cc.values, labels=cc.index, colors=[QPAL[c] for c in cc.index], autopct='%1.1f%%', startangle=90); ax[1].set_title("Proporción")
@@ -151,9 +151,9 @@ for r,q in enumerate(QUALITY_CLASSES):
 fig.suptitle("Taxonomía propuesta — 3 clases (Estándar = Regular real)", fontweight='bold')
 plt.tight_layout(); plt.savefig(FIGURES_DIR/"fase2_taxonomia.pdf", bbox_inches="tight"); plt.show()""")
 
-# ── 3. Spatial discordance ────────────────────────────────────────────────────
+# 3. Spatial discordance
 M("""## 3. Análisis espacial de discordancia (Mixed)
-La carpeta **Mixed** tiene varias frutas por foto → otra resolución/aspecto.
+La carpeta **Mixed** tiene varias frutas por foto  otra resolución/aspecto.
 Lo demostramos con boxplots, KDE y el test de **Kolmogórov–Smirnov**.""")
 C("""def dims(paths):
     out=[]
@@ -191,13 +191,13 @@ print("H₀: Mixed proviene de la misma distribución espacial que las limpias\\
 fig,ax=plt.subplots(1,3,figsize=(16,4))
 for a,(m,lab) in zip(ax,[('width','Ancho'),('height','Alto'),('aspect_ratio','Aspect Ratio')]):
     D,p=ks_2samp(mixed[m],rest[m])
-    print(f"  {lab:13s} D_KS={D:.3f}  p={p:.2e}  {'→ DIFERENTE' if p<0.05 else '→ igual'}")
+    print(f"  {lab:13s} D_KS={D:.3f}  p={p:.2e}  {' DIFERENTE' if p<0.05 else ' igual'}")
     for data,name,c in [(rest,'Limpias','#3498db'),(mixed,'Mixed','#9b59b6')]:
         sv=np.sort(data[m].values); a.plot(sv,np.arange(1,len(sv)+1)/len(sv),label=name,color=c,lw=2)
     a.set_title(f"ECDF — {lab}\\nD={D:.3f}, p={p:.1e}"); a.legend()
 plt.tight_layout(); plt.savefig(FIGURES_DIR/"fase2_discordancia_ks.pdf", bbox_inches="tight"); plt.show()""")
 
-# ── 4. Visual properties ──────────────────────────────────────────────────────
+# 4. Visual properties
 M("## 4. Propiedades visuales y resolución por clase")
 C("""def vstats(path):
     im=cv2.imread(path)
@@ -226,7 +226,7 @@ for q,g in sdf.groupby('quality'):
 ax[1].axvline(1.0,color='black',ls='--',lw=1); ax[1].set_title("Aspect Ratio"); ax[1].legend()
 plt.tight_layout(); plt.savefig(FIGURES_DIR/"fase2_resolucion.pdf", bbox_inches="tight"); plt.show()""")
 
-# ── 5. Overlap quantification ─────────────────────────────────────────────────
+# 5. Overlap quantification
 M("""## 5. Solapamiento distributivo Mixed vs clases limpias
 Características de color (HSV-H,S) + textura (**LBP**), proyección **PCA**/**t-SNE**
 y cuantificación con **Jensen–Shannon** y **Bhattacharyya**.""")
@@ -263,14 +263,14 @@ C("""def jsd(p,q):
     return float(np.clip(.5*np.sum(p*np.log(p/m))+.5*np.sum(q*np.log(q/m)),0,1))
 def bhatt(p,q): return float(np.sum(np.sqrt((p+1e-10)*(q+1e-10))))
 pm=X[lab=='Mixed'].mean(0); pr=X[lab=='Limpias'].mean(0); pm/=pm.sum(); pr/=pr.sum()
-print(f"Jensen–Shannon (Mixed ↔ Limpias): {jsd(pm,pr):.4f}   (0=idénticas, 1=disjuntas)")
-print(f"Bhattacharyya  (Mixed ↔ Limpias): {bhatt(pm,pr):.4f}   (1=idénticas, 0=disjuntas)")
-print("\\n→ Mixed solapa fuertemente con las clases limpias en color/textura:")
+print(f"Jensen–Shannon (Mixed  Limpias): {jsd(pm,pr):.4f}   (0=idénticas, 1=disjuntas)")
+print(f"Bhattacharyya  (Mixed  Limpias): {bhatt(pm,pr):.4f}   (1=idénticas, 0=disjuntas)")
+print("\\n Mixed solapa fuertemente con las clases limpias en color/textura:")
 print("  usarla como clase directa metería ruido de etiqueta. Por eso en Fase 3 se")
 print("  segmenta en frutas individuales, se re-etiqueta por daño (NTC-4580) y va")
 print("  SOLO a enriquecer train. La clase Estándar usa las carpetas Regular reales.")""")
 
-# ── 6. RGB ────────────────────────────────────────────────────────────────────
+# 6. RGB
 M("## 6. Espacio de color RGB — histograma promedio por clase")
 C("""def rgb_hist(path,nb=64):
     im=cv2.imread(path)
@@ -288,15 +288,15 @@ for q in QUALITY_CLASSES:
 for ci in range(3): ax[ci].set_title(f"Canal {chan[ci]}"); ax[ci].legend(fontsize=8)
 plt.tight_layout(); plt.savefig(FIGURES_DIR/"fase2_rgb.pdf", bbox_inches="tight"); plt.show()""")
 
-# ── 7. examples already in 2.4 taxonomy; 8 Kruskal ─────────────────────────────
+# 7. examples already in 2.4 taxonomy; 8 Kruskal
 M("## 7. Tests estadísticos de diferencias entre clases (Kruskal–Wallis)")
 C("""print("H₀: las 3 clases tienen la misma distribución de la propiedad\\n")
 for m in ['brightness','contrast','saturation']:
     H,p=kruskal(*[sdf[sdf.quality==q][m] for q in QUALITY_CLASSES])
-    print(f"  {m:11s} H={H:7.2f}  p={p:.2e}  {'✓ SIGNIFICATIVO' if p<0.05 else '✗ no significativo'}")
-print("\\np<0.05 → diferencias reales entre clases → hay señal discriminante (justifica features de color en Fase 4).")""")
+    print(f"  {m:11s} H={H:7.2f}  p={p:.2e}  {' SIGNIFICATIVO' if p<0.05 else ' no significativo'}")
+print("\\np<0.05  diferencias reales entre clases  hay señal discriminante (justifica features de color en Fase 4).")""")
 
-# ── 8. own vs kaggle ──────────────────────────────────────────────────────────
+# 8. own vs kaggle
 M("## 8. Comparación propio vs Kaggle (Mann–Whitney U)")
 C("""rows=[]
 for src in ['Kaggle','Propio']:
@@ -308,10 +308,10 @@ cmp=pd.DataFrame(rows)
 print("Mann–Whitney U (Kaggle vs Propio):")
 for m in ['brightness','contrast','saturation']:
     U,p=mannwhitneyu(cmp[cmp.source=='Kaggle'][m],cmp[cmp.source=='Propio'][m])
-    print(f"  {m:11s} p={p:.2e}  {'→ DIFERENTE (domain shift)' if p<0.05 else '→ similar'}")
-print("\\n→ Si difieren, hay domain shift → en Fase 5 evaluamos el desempeño por fuente.")""")
+    print(f"  {m:11s} p={p:.2e}  {' DIFERENTE (domain shift)' if p<0.05 else ' similar'}")
+print("\\n Si difieren, hay domain shift  en Fase 5 evaluamos el desempeño por fuente.")""")
 
-# ── 9. summary ────────────────────────────────────────────────────────────────
+# 9. summary
 M("## 9. Resumen ejecutivo del EDA")
 C("""print('═'*64)
 print('  RESUMEN EJECUTIVO — EDA FruitVision (CRISP-DM Fase 2)')
@@ -323,27 +323,27 @@ print(f'''
 
 2. DESBALANCEO
    Premium {cc['Premium']:,} | Estándar {cc['Estándar']:,} | Descarte {cc['Descarte']:,}
-   Imbalance Ratio : {ir:.2f}x  → cap por fruta×clase + class_weight (Fase 3)
+   Imbalance Ratio : {ir:.2f}x   cap por fruta×clase + class_weight (Fase 3)
 
 3. MIXED (multi-fruta)
    Espacialmente DISTINTA (KS p≪0.05) y con alto solapamiento de color (Bhatt~0.9)
-   → no es clase directa; se segmenta + re-etiqueta por daño (Fase 3, solo train)
+    no es clase directa; se segmenta + re-etiqueta por daño (Fase 3, solo train)
 
 4. SEÑAL DISCRIMINANTE
    Brillo/contraste/saturación difieren entre clases (Kruskal–Wallis p≪0.05)
 
 5. DOMAIN SHIFT
-   Propio vs Kaggle difieren (Mann–Whitney) → evaluación por fuente en Fase 5
+   Propio vs Kaggle difieren (Mann–Whitney)  evaluación por fuente en Fase 5
 ''')""")
 
-M("""## 10. Conclusiones → decisiones para Fase 3
+M("""## 10. Conclusiones  decisiones para Fase 3
 - Dataset **combinado** (Kaggle + propio); **Estándar = carpetas Regular reales**.
 - **Cap por fruta×calidad** (corrige Pomegranate) + `class_weight`.
 - **Split agrupado anti-fuga** (perceptual hash) — evita casi-duplicados entre splits.
 - **Mixed**: segmentación individual + re-etiquetado por daño (NTC-4580), solo a train.
 - **Tamaño** por segmentación (diámetro normalizado, terciles en train).
 
-➡️ **Siguiente:** Fase 3 — Preparación.""")
+ **Siguiente:** Fase 3 — Preparación.""")
 
 nb = new_notebook(cells=cells)
 nb.metadata.kernelspec = {"display_name":"Python (fruit-quality)","language":"python","name":"fruit-quality"}

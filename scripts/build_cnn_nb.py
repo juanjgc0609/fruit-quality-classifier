@@ -15,7 +15,7 @@ M("""# Fase 4 (parte B) — CNN desde cero
 **Proyecto:** FruitVision — Clasificación de Calidad de Frutas
 
 ---
-CNN entrenada **desde cero**: 3 bloques Conv→BatchNorm→MaxPool + GAP + Dense +
+CNN entrenada **desde cero**: 3 bloques ConvBatchNormMaxPool + GAP + Dense +
 Dropout, con data augmentation, `class_weight` y callbacks.
 
 **Ablation:** entrenamos la CNN con dos variantes de train —**con** y **sin** los
@@ -115,7 +115,7 @@ C("""cnn.save(MODELS_DIR/"cnn_quality.keras")
 pd.DataFrame({'modelo':['CNN'],'variante':[best_tag],'accuracy':[acc],'f1_macro':[f1]}).to_csv(MODELS_DIR/"cnn_metrics.csv", index=False)
 print("Modelo guardado en models/saved/cnn_quality.keras")""")
 
-M("➡️ **Siguiente:** Fase 5 — Evaluación comparativa.")
+M(" **Siguiente:** Fase 5 — Evaluación comparativa.")
 
 nb = new_notebook(cells=cells)
 nb.metadata.kernelspec = {"display_name":"Python (fruit-quality)","language":"python","name":"fruit-quality"}

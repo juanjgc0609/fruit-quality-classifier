@@ -18,10 +18,10 @@ M("""# Fase 3 — Preparación de los Datos
 Combina **dos fuentes** y produce un conjunto limpio, balanceado y dividido,
 con **estimación de tamaño** por segmentación:
 
-- **Kaggle** (`data/external`): Good→Premium, Bad→Descarte. La carpeta **Mixed se
-  EXCLUYE** (varias frutas por foto, fondo no uniforme → se reserva para el
+- **Kaggle** (`data/external`): GoodPremium, BadDescarte. La carpeta **Mixed se
+  EXCLUYE** (varias frutas por foto, fondo no uniforme  se reserva para el
   ejercicio de segmentación).
-- **Dataset propio** (`data/raw`): Good→Premium, **Regular→Estándar**, Bad→Descarte.
+- **Dataset propio** (`data/raw`): GoodPremium, **RegularEstándar**, BadDescarte.
 
 La clase **Estándar** proviene ahora de imágenes propias *Regular* (1 fruta por
 foto), reemplazando al antiguo "Mixed".
@@ -74,8 +74,8 @@ print(pd.concat([
 
 M("""## 3. Anti-fuga + split agrupado 70/15/15
 El dataset trae **ráfagas de la misma fruta** (Kaggle y propio). Un split aleatorio
-filtraría fotos casi idénticas entre train y test → **fuga de datos**. Lo evitamos:
-agrupamos casi-duplicados con *perceptual hash* (dHash + Hamming ≤ 5) → `group_id`,
+filtraría fotos casi idénticas entre train y test  **fuga de datos**. Lo evitamos:
+agrupamos casi-duplicados con *perceptual hash* (dHash + Hamming ≤ 5)  `group_id`,
 y hacemos el split **por grupo** dentro de cada clase.""")
 C("""from src.data.dedup import assign_groups
 capped = capped.copy()
@@ -123,7 +123,7 @@ M("""## 4.3 Enriquecimiento con la carpeta Mixed (segmentación multi-fruta)
 La carpeta Kaggle **Mixed** tiene varias frutas por foto. La **segmentamos en
 recortes individuales** (cumple el requisito del enunciado) y los re-etiquetamos
 por **daño superficial (heurística NTC-4580)**. Estos recortes se añaden **solo a
-train** (nunca val/test) → enriquecen el entrenamiento sin meter etiquetas
+train** (nunca val/test)  enriquecen el entrenamiento sin meter etiquetas
 derivadas de color en la evaluación (evita métricas circulares).""")
 C("""print("Composición de TRAIN por fuente:")
 tr = df[df['split']=='train']
@@ -144,7 +144,7 @@ if len(seg):
 M("""## 5. Auditoría de label-noise (NTC-4580, umbral de daño por especie)
 Aplicamos la heurística de daño a una muestra de **cada clase** para cuantificar:
 - En **Premium/Descarte** (etiqueta de carpeta): qué fracción "re-etiquetaría" el
-  daño → estimación de *label noise* y verificación del **piso de clase** (un
+  daño  estimación de *label noise* y verificación del **piso de clase** (un
   Descarte no debería volverse Premium).
 - En **Mixed**: cómo se reparte el daño en Premium/Estándar/Descarte.
 Usa el umbral de daño **por especie** (FIX-PER-FRUIT: Banana 35, Pomegranate 40).""")
@@ -180,17 +180,17 @@ mixdf=pd.DataFrame(mix).sample(min(300,len(mix)),random_state=1)
 am=audit(mixdf, allow_multiple=True); am['origin']='Mixed'; audit_rows.append(am)
 A=pd.concat(audit_rows, ignore_index=True)
 
-print("\\n── Auditoría por clase de origen → etiqueta según daño ──")
+print("\\n── Auditoría por clase de origen  etiqueta según daño ──")
 for q in ['Premium','Descarte','Mixed']:
     sub=A[A['origin']==q]
     if not len(sub): continue
     dist=sub['pred'].value_counts(normalize=True).mul(100).round(1).to_dict()
     print(f"  {q:9s} (n={len(sub)}): {dist}")
     if q=='Premium':
-        print(f"     → label noise estimado (no-Premium): {100*(sub['pred']!='Premium').mean():.1f}%")
+        print(f"      label noise estimado (no-Premium): {100*(sub['pred']!='Premium').mean():.1f}%")
     if q=='Descarte':
         viol=100*(sub['pred']=='Premium').mean()
-        print(f"     → piso de clase: {viol:.1f}% ascendió a Premium ({'OK' if viol<2 else 'revisar'})")
+        print(f"      piso de clase: {viol:.1f}% ascendió a Premium ({'OK' if viol<2 else 'revisar'})")
 fig,ax=plt.subplots(1,3,figsize=(15,4))
 for a_,q in zip(ax,['Premium','Descarte','Mixed']):
     sub=A[A['origin']==q]['pred'].value_counts().reindex(QUALITY_CLASSES).fillna(0)
@@ -205,27 +205,27 @@ C("""tr=df[df['split']=='train']; va=df[df['split']=='val']; te=df[df['split']==
 # 6.1 Anti-fuga: ningún grupo de casi-duplicados cruza particiones
 span=df.groupby('group_id')['split'].nunique()
 assert (span>1).sum()==0, "FUGA: hay grupos en más de un split"
-print("✓ Anti-fuga: 0 grupos cruzan train/val/test")
+print(" Anti-fuga: 0 grupos cruzan train/val/test")
 
 # 6.2 Enriquecimiento Mixed solo en train (no en val/test)
 assert (va['source']=='mixed_seg').sum()==0 and (te['source']=='mixed_seg').sum()==0, \\
     "Hay recortes mixed_seg en val/test"
-print("✓ mixed_seg solo en train (val/test con etiquetas limpias)")
+print(" mixed_seg solo en train (val/test con etiquetas limpias)")
 
 # 6.3 Sin NaN en columnas clave
 for col in ['quality','quality_idx','fruit','source','size','split']:
     assert df[col].notna().all(), f"NaN en columna {col}"
-print("✓ Sin valores nulos en columnas clave")
+print(" Sin valores nulos en columnas clave")
 
 # 6.4 Todas las clases presentes en cada split
 for nm,d_ in [('train',tr),('val',va),('test',te)]:
     assert set(d_['quality'].unique())>=set(QUALITY_CLASSES), f"Falta una clase en {nm}"
-print("✓ Las 3 clases presentes en train/val/test")
+print(" Las 3 clases presentes en train/val/test")
 
 # 6.5 Las imágenes existen en disco (muestra)
 miss=sum(1 for p in df['abs_path'].sample(min(200,len(df)),random_state=0) if not __import__('pathlib').Path(p).exists())
 assert miss==0, f"{miss} imágenes no existen en disco"
-print("✓ Muestra de rutas verificada en disco")
+print(" Muestra de rutas verificada en disco")
 
 print("\\nFuentes por split:")
 for nm,d_ in [('train',tr),('val',va),('test',te)]:
@@ -252,7 +252,7 @@ M("""## 7. Resumen de la Fase 3
 | Clase Estándar | Carpetas **Regular reales** de ambas fuentes (no Mixed) |
 | Balanceo | Cap por **fruta×calidad** + `class_weight='balanced'` |
 | Split | **Agrupado anti-fuga** (perceptual hash dHash) 70/15/15 estratificado |
-| Mixed | **Segmentación multi-fruta + watershed** + re-etiquetado por daño → solo train |
+| Mixed | **Segmentación multi-fruta + watershed** + re-etiquetado por daño  solo train |
 | Daño | NTC-4580 con **umbral oscuro por especie** (FIX-PER-FRUIT) |
 | Tamaño | Diámetro equivalente normalizado, terciles aprendidos en train |
 
@@ -262,7 +262,7 @@ M("""## 7. Resumen de la Fase 3
 - Los umbrales de daño son heurísticos; los errores residuales se verán en la matriz
   de confusión de Fase 5.
 
-➡️ **Siguiente:** Fase 4 — Modelado.""")
+ **Siguiente:** Fase 4 — Modelado.""")
 
 nb = new_notebook(cells=cells)
 nb.metadata.kernelspec = {"display_name":"Python (fruit-quality)","language":"python","name":"fruit-quality"}

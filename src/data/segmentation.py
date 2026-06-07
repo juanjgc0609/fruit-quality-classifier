@@ -139,11 +139,9 @@ def assign_size_class(diameter_norm: float, thresholds: tuple[float, float]) -> 
     return "Grande"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Segmentación MULTI-fruta + estimación de daño (fusión con el trabajo del
 # compañero). Se usa para la carpeta Mixed, que el enunciado pide segmentar en
 # frutas individuales. El daño re-etiqueta cada recorte por la heurística NTC-4580.
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _foreground_mask(gray: np.ndarray, adaptive: bool) -> np.ndarray:
     """Máscara binaria de primer plano (Otsu o adaptativo) + morfología."""

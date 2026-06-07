@@ -144,7 +144,7 @@ M("""## Resumen
 - **Ablation con/sin `mixed_seg`** (mismos val/test): se conserva la variante ganadora por modelo.
 - Ambos superan ampliamente la línea base; el mejor se guarda para el despliegue.
 
-➡️ **Siguiente:** Fase 4 (parte B) — CNN.""")
+ **Siguiente:** Fase 4 (parte B) — CNN.""")
 
 nb = new_notebook(cells=cells)
 nb.metadata.kernelspec = {"display_name":"Python (fruit-quality)","language":"python","name":"fruit-quality"}

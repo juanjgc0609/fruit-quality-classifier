@@ -103,21 +103,17 @@ fruit-quality-classifier/
 
 El proyecto requiere mínimo **2 modelos de ML tradicional** y **1 de Deep Learning**.
 
-**Machine Learning tradicional** (características extraídas: HOG + histogramas de color):
+Resultados en el **conjunto de prueba balanceado** (n=1076, sin fuga de datos):
 
-| Modelo | Hiperparámetros a ajustar | Accuracy (val) | F1-Score |
-|--------|--------------------------|----------------|----------|
-| Random Forest | n_estimators, max_depth, min_samples_split | — | — |
-| XGBoost | learning_rate, max_depth, n_estimators, subsample | — | — |
+| Modelo | Características / Arquitectura | Accuracy | F1-macro |
+|--------|------------------------------|----------|----------|
+| Línea base (clase mayoritaria) | — | 0.328 | 0.165 |
+| Random Forest | HOG + color HSV (GridSearchCV k=5) | 0.886 | 0.886 |
+| **XGBoost** ⭐ | HOG + color HSV (GridSearchCV k=5) | **0.905** | **0.905** |
+| CNN desde cero | 3 conv + BN + GAP + Dense + Dropout | 0.886 | 0.886 |
 
-**Deep Learning:**
-
-| Modelo | Arquitectura | Accuracy (val) | F1-Score |
-|--------|-------------|----------------|----------|
-| CNN desde cero | 3 conv + MaxPooling + Dense + Dropout | — | — |
-
-> Ajuste de hiperparámetros: GridSearchCV k=5 para ML · EarlyStopping + ReduceLROnPlateau para CNN.  
-> Los resultados se actualizarán conforme avance el proyecto.
+> Ajuste de hiperparámetros: GridSearchCV k=5 (ML) · EarlyStopping + ReduceLROnPlateau (CNN).
+> **Ablation:** el enriquecimiento con frutas segmentadas de *Mixed* mejora la CNN pero perjudica al ML (ver `models/saved/ablation_*.csv`).
 
 ---
 
@@ -165,27 +161,43 @@ streamlit run src/app/app.py
 
 ## 📊 Resultados principales
 
-> *Esta sección se completará con gráficas y métricas al finalizar el proyecto.*
+- **Mejor modelo:** XGBoost — Accuracy **0.905**, F1-macro **0.905** (test balanceado, sin fuga).
+- **Generalización por fuente:** Kaggle 0.880 · imágenes propias 0.951 (accuracy, XGBoost).
+- **Errores** concentrados en la frontera Premium↔Estándar (la transición más ambigua).
+- 26+ figuras vectoriales en [`reports/figures/`](reports/figures/); informe en [`reports/final/`](reports/final/).
 
 ---
 
-## ⚖️ Consideraciones éticas
+## ⚖️ Consideraciones éticas e impactos
 
-- Posible sesgo en las etiquetas de calidad si reflejan estándares no inclusivos.
-- El sistema no debe usarse como única herramienta de decisión sin supervisión humana.
-- Los datos recolectados no incluyen información personal de vendedores o compradores.
+El informe final incluye una **tabla de dilemas éticos** (PI1) y una **matriz de impactos**
+social/económico/ambiental/global (PI2). Resumen:
+
+| Situación | Principio | Medida |
+|-----------|-----------|--------|
+| Privacidad en fotos | Respeto a la privacidad | Solo se procesa la región de la fruta |
+| Sesgo por especie (Pomegranate) | Equidad | Cap por fruta×clase + evaluación por fuente |
+| Etiqueta de calidad subjetiva | Honestidad | Criterios documentados + auditoría de label noise |
+| Falsos negativos (Descarte→venta) | Bienestar público | Humano en el bucle; el sistema asiste, no reemplaza |
+| Datos de terceros | Atribución | Cita explícita del dataset y librerías |
+
+> Ver detalle y la matriz de impactos en [`reports/final/informe.tex`](reports/final/informe.tex).
 
 ---
 
 ## 📄 Informe final
 
-El informe final está disponible en [`reports/final/`](reports/final/).
+Informe en formato **IEEE**: [`reports/final/informe.tex`](reports/final/informe.tex)
+(compilar en Overleaf — ver [`reports/final/README.md`](reports/final/README.md)).
+Diagrama de flujo CRISP-DM vectorial: [`reports/figures/crispdm_flujo.pdf`](reports/figures/crispdm_flujo.pdf).
 
 ---
 
 ## 🎥 Video de presentación
 
-> *Enlace al video — máximo 10 minutos.*
+Guion listo en [`reports/final/guion_video.md`](reports/final/guion_video.md).
+
+> *Enlace al video (≤10 min) — pendiente de grabación.*
 
 ---
 

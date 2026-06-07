@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# ─── Rutas base ───────────────────────────────────────────────────────────────
+# Rutas base
 # src/config.py -> parents[1] es la raíz del repositorio.
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
@@ -34,21 +34,21 @@ LABELS_CSV = ANNOTATIONS_DIR / "labels.csv"
 for _d in (PROCESSED_DIR, MODELS_DIR, FIGURES_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
-# ─── Reproducibilidad ───────────────────────────────────────────────────────────
+# Reproducibilidad
 SEED: int = 42
 
-# ─── Clases del problema ────────────────────────────────────────────────────────
+# Clases del problema
 # Calidad: 3 categorías (cumple el mínimo "3 o más" del enunciado).
-#   Premium  <- Good Quality_Fruits
-#   Estándar <- Mixed Qualit_Fruits
-#   Descarte <- Bad Quality_Fruits
+# Premium  <- Good Quality_Fruits
+# Estándar <- Mixed Qualit_Fruits
+# Descarte <- Bad Quality_Fruits
 QUALITY_CLASSES: list[str] = ["Premium", "Estándar", "Descarte"]
 QUALITY_TO_IDX: dict[str, int] = {c: i for i, c in enumerate(QUALITY_CLASSES)}
 
 # Mapeo de carpetas de calidad -> clase del proyecto.
-#   Good    -> Premium       (1 fruta por foto)
-#   Regular -> Estándar      (1 fruta por foto, calidad media) [solo dataset propio]
-#   Bad     -> Descarte      (1 fruta por foto)
+# Good    -> Premium       (1 fruta por foto)
+# Regular -> Estándar      (1 fruta por foto, calidad media) [solo dataset propio]
+# Bad     -> Descarte      (1 fruta por foto)
 # La carpeta Kaggle "Mixed" se EXCLUYE del entrenamiento (varias frutas por foto,
 # fondo no uniforme); se reserva para el ejercicio de segmentación/evaluación.
 FOLDER_QUALITY_MAP: dict[str, str] = {
@@ -60,13 +60,13 @@ FOLDER_QUALITY_MAP: dict[str, str] = {
 # Tamaño: derivado por segmentación (diámetro en píxeles normalizados).
 SIZE_CLASSES: list[str] = ["Pequeño", "Mediano", "Grande"]
 
-# ─── Parámetros de preparación de datos ─────────────────────────────────────────
+# Parámetros de preparación de datos
 # Cap por (fruta × calidad): evita que una sola fruta domine una clase
 # (p. ej. Pomegranate_Good inflaba Premium, hallazgo del EDA §2.3) y reduce el
 # desbalanceo. El residual se corrige con class_weight='balanced'.
 CAP_PER_FRUIT_QUALITY: int = 400
 
-# ─── Enriquecimiento con la carpeta Mixed (segmentación multi-fruta) ─────────────
+# Enriquecimiento con la carpeta Mixed (segmentación multi-fruta)
 # La carpeta Kaggle "Mixed" tiene varias frutas por foto. La segmentamos en
 # recortes individuales y los re-etiquetamos por daño (NTC-4580). Se usan SOLO
 # como enriquecimiento de TRAIN (nunca val/test) para no introducir etiquetas
@@ -83,6 +83,6 @@ TRAIN_RATIO: float = 0.70
 VAL_RATIO: float = 0.15
 TEST_RATIO: float = 0.15
 
-# ─── Tamaños de imagen ──────────────────────────────────────────────────────────
+# Tamaños de imagen
 FEATURE_IMG_SIZE: tuple[int, int] = (128, 128)  # Para HOG + histogramas (ML)
 CNN_IMG_SIZE: tuple[int, int] = (96, 96)         # Entrada de la CNN (CPU-friendly)

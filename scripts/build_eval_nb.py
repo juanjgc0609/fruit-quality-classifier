@@ -119,7 +119,7 @@ C("""import pandas as pd
 ct = pd.crosstab(te['quality'], te['size']).reindex(index=QUALITY_CLASSES,
         columns=['Pequeño','Mediano','Grande'])
 print("Tamaño (estimado) × calidad en test:"); print(ct.to_string())
-print("\\n→ El tamaño es 'fracción del encuadre ocupada por la fruta', medida")
+print("\\n El tamaño es 'fracción del encuadre ocupada por la fruta', medida")
 print("  reproducible y útil para la app, pero NO equivale a tamaño físico.")""")
 
 M("## 8. Ablation (resumen): ¿ayudó el enriquecimiento Mixed?")
@@ -134,7 +134,7 @@ print("Los modelos guardados corresponden a la variante ganadora por modelo.")""
 M("""## 9. Resumen de la Fase 5
 - Comparación justa (mismo test, split **sin fuga**), 3 clases balanceadas en test.
 - Tabla, matrices de confusión y **análisis de errores**.
-- **Desglose por fuente** (Kaggle vs propio) → evidencia de generalización.
+- **Desglose por fuente** (Kaggle vs propio)  evidencia de generalización.
 - **Ablation** con/sin enriquecimiento Mixed: se conserva la variante ganadora.
 - **Tamaño**: medición por segmentación (fracción del encuadre), no físico.""")
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# ─── Bootstrap: raíz del repo en el path para importar `src` ────────────────────
+#  Bootstrap: raíz del repo en el path para importar `src`
 ROOT = Path(__file__).resolve()
 while not (ROOT / "src").exists() and ROOT != ROOT.parent:
     ROOT = ROOT.parent
@@ -35,7 +35,7 @@ from src.data.preprocessing import load_size_thresholds
 from src.data.segmentation import assign_size_class, segment_fruit
 from src.features.extract import extract_features
 
-# ─── Configuración de la página ─────────────────────────────────────────────────
+#  Configuración de la página
 st.set_page_config(page_title="FruitVision", page_icon="🍎", layout="wide")
 
 QUALITY_ICON = {"Premium": "🟢", "Estándar": "🟡", "Descarte": "🔴"}
@@ -46,7 +46,7 @@ RECOMMENDATION = {
 }
 
 
-# ─── Carga de modelos (cacheada) ────────────────────────────────────────────────
+#  Carga de modelos (cacheada)
 @st.cache_resource
 def load_quality_models():
     """Carga los modelos de calidad y los umbrales de tamaño una sola vez."""
@@ -60,7 +60,7 @@ def load_quality_models():
     return ml, cnn, thresholds
 
 
-# ─── Inferencia ─────────────────────────────────────────────────────────────────
+#  Inferencia
 def predict_quality(image_rgb: np.ndarray, model_name: str, ml, cnn):
     """Devuelve (clase_calidad, confianza, vector_probabilidades)."""
     if model_name == "CNN (desde cero)" and cnn is not None:
@@ -87,7 +87,7 @@ def analyze(image_rgb: np.ndarray, model_name: str, ml, cnn, thresholds):
                 diameter=seg.diameter_norm, vis=vis)
 
 
-# ─── Interfaz ───────────────────────────────────────────────────────────────────
+#  Interfaz
 def main():
     st.title("🍎 FruitVision — Clasificación de Calidad de Frutas")
     st.caption("Fase 6 (Despliegue) · Algoritmos y Programación III · Universidad Icesi")
